@@ -1,0 +1,122 @@
+---
+title: "Coursera_MachineLearningFinalAssignment"
+author: "Collier King"
+date: "June 12, 2016"
+output: html_document
+---
+# Practical Machine Learning - Final Project
+
+## Introduction & Background
+
+The rise of the internet of things has created an entire industry of personal activity
+tracking devices. These devices allow the user to measure their activities and seek ways to 
+improve their health. In addition to merely measuring the level of activity a user engages in,
+it might be useful to the user to measure how well they are actually performing the activities.
+
+In this analysis, we will be using the data from Weight Lifting Exercises dataset. 
+The data consist of results for different exercises as gathered by accelerometers on the belt, 
+forearm, and dumbells of six study subjects.  Our data are separated into training and testing sets.  
+The training set holds an indicator column for the quality of the exercise performed, 
+the testing set does not have this column.  
+This analysis will attempt to correctly predict this indicator column on the test set.
+
+```{r, include=FALSE}
+#Load packages
+library(caret)
+setwd("C:\\Users\\Collier\\Dropbox\\Skills\\R\\Case Practice\\Machine Learning\\Coursera_MLFinalProject\\Coursera_MLFinalProject")
+```
+
+## Data Preparation
+```{r, message=FALSE}
+dtrain <- read.csv(file="pml-training.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=',', na.strings=c('NA','','#DIV/0!'))
+dtest <- read.csv(file="pml-testing.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=',', na.strings=c('NA','','#DIV/0!'))
+
+# Convert response variable "classe" to factor type
+dtrain$classe <- as.factor(dtrain$classe)
+
+#Remove missing data
+NAindex <- apply(dtrain,2,function(x) {sum(is.na(x))}) 
+dtrain <- dtrain[,which(NAindex == 0)]
+
+NAindex <- apply(dtest,2,function(x) {sum(is.na(x))}) 
+dtest <- dtest[,which(NAindex == 0)]
+
+```
+
+## Pre-processing and Scaling
+The prediction variables are preprocessed by K-nearest neighbors imputation, centering and scaling.
+```{r, message=FALSE}
+var <- which(lapply(dtrain, class) %in% "numeric")
+
+preObj <-preProcess(dtrain[,var],method=c('knnImpute', 'center', 'scale'))
+
+dtrainscale <- predict(preObj, dtrain[,var])
+dtrainscale$classe <- dtrain$classe
+
+dtestscale <-predict(preObj,dtrain[,var])
+```
+
+## Remove variables with near zero variance
+Features are reduced by removing variables with near zero variance.  This variables will have low importance in the prediction process.
+```{r, message=FALSE}
+var0 <- nearZeroVar(dtrainscale,saveMetrics = TRUE)
+dtrainscale <- dtrainscale[,var0$nzv==FALSE]
+
+var0 <- nearZeroVar(dtestscale,saveMetrics = TRUE)
+dtestscale <- dtestscale[,var0$nzv==FALSE]
+
+```
+
+## Create Cross-Validation Set
+The training set it then divided into two parts (60/40) for training and cross validation, respectively.
+```{r, message=FALSE}
+set.seed(5424613)
+inTrain <- createDataPartition(dtrainscale$classe, p = 0.6, list = FALSE)
+train <- dtrainscale[inTrain,]
+xVal <- dtrainscale[-inTrain,]
+```
+
+## Model Building on Training Set
+I chose to use a random forest model. 27 predictor variables will be used with 3-fold cross validation for the train control method.
+```{r, message=FALSE}
+startTime <- Sys.time();
+
+modRF <- train(classe ~., method="rf", data=train, trControl=trainControl(method='cv'), number=3, allowParallel=TRUE)
+
+endTime <- Sys.time()
+endTime - startTime
+
+modRF
+```
+
+## Measuring Model Accuracy on Training Dataset
+Initial model prediction executed on training Dataset.
+```{r, message=FALSE}
+trainPred <- predict(modRF,train)
+confusionMatrix(trainPred,train$classe)
+```
+
+## Measuring Accuracy on Cross Validation Dataset
+Cross validation dataset testing of model. The model's accuracy is 99.17% with an out of sample error of .83%.
+```{r, message=FALSE}
+xValPred <- predict(modRF,xVal)
+confusionMatrix(xValPred,xVal$classe)
+```
+
+## Model Evaluation on Testing Dataset
+Generate predictions on actual test set data. Write prediction files for submission.
+```{r, message=FALSE}
+testPred <- predict(modRF,dtest)
+
+# Write prediction data to file
+path = "./Predictions"
+MLpred_submit = function(x) {
+    n = length(x)
+    for(i in 1: n) {
+        filename = paste0("problem_id_", i, ".txt")
+        write.table(x[i], file=file.path(path, filename), 
+                    quote=FALSE, row.names=FALSE, col.names=FALSE)
+    }
+}
+MLpred_submit(testPred)
+```
